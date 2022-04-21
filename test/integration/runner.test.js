@@ -65,6 +65,14 @@ async function purgeTestQueue(url, name) {
     await conn.close();
 }
 
+async function getFromBroker(brokerUrl, queueName) {
+    const amqp = new AMQPClient(brokerUrl);
+    const conn = await amqp.connect();
+    const channel = await conn.channel();
+    const queue = await channel.queue(queueName);
+    return { conn, channel, queue };
+}
+
 describe('queue-migration', function () {
     this.timeout(5000);
     let originalEnv;
@@ -93,10 +101,7 @@ describe('queue-migration', function () {
     it('should fail to connect to source if there is another client attached', async () => {
 
         // connect fake concurrent client
-        const amqp = new AMQPClient(sourceBrokerURL);
-        const conn = await amqp.connect();
-        const channel = await conn.channel();
-        const queue = await channel.queue('test-source', { passive: true });
+        const { queue, channel, conn } = await getFromBroker(sourceBrokerURL, 'test-source');
         const consumer = await queue.subscribe({}, async (msg) => {
             assert.fail(msg);
         });
@@ -117,6 +122,7 @@ describe('queue-migration', function () {
         }
 
         //cleanup
+        await channel.close();
         await conn.close();
         await closeConnections();
 
@@ -153,12 +159,10 @@ describe('queue-migration', function () {
 
         try {
             await run();
-            const amqp = new AMQPClient(sourceBrokerURL);
-            const conn = await amqp.connect();
-            const channel = await conn.channel();
-            const queue = await channel.queue('test-source');
+            const { queue, channel, conn } = await getFromBroker(sourceBrokerURL, 'test-source');
             await queue.publish('{"test": true}');
             await channel.close();
+            await conn.close();
 
         } catch(err) {
             assert.ifError(err);
@@ -178,12 +182,10 @@ describe('queue-migration', function () {
 
         try {
             await run();
-            const amqp = new AMQPClient(sourceBrokerURL);
-            const conn = await amqp.connect();
-            const channel = await conn.channel();
-            const queue = await channel.queue('test-source');
+            const { queue, channel, conn } = await getFromBroker(sourceBrokerURL, 'test-source');
             await queue.publish('{"test": true}');
             await channel.close();
+            await conn.close();
 
         } catch(err) {
             assert.ifError(err);
@@ -204,14 +206,12 @@ describe('queue-migration', function () {
 
         try {
             await run();
-            const amqp = new AMQPClient(sourceBrokerURL);
-            const conn = await amqp.connect();
-            const channel = await conn.channel();
-            const queue = await channel.queue('fail-queue');
+            const { queue, channel, conn } = await getFromBroker(sourceBrokerURL, 'fail-queue');
             await queue.publish('{"test": true}');
             const returnedMessage = await once(events, 'returned');
             assert.isObject(returnedMessage[0]);
             await channel.close();
+            await conn.close();
 
         } catch(err) {
             assert.ifError(err);
@@ -235,12 +235,10 @@ describe('queue-migration', function () {
 
         try {
             await run();
-            const amqp = new AMQPClient(sourceBrokerURL);
-            const conn = await amqp.connect();
-            const channel = await conn.channel();
-            const queue = await channel.queue('test-source');
+            const { queue, channel, conn } = await getFromBroker(sourceBrokerURL, 'test-source');
             await queue.publish('{"test": true}');
             await channel.close();
+            await conn.close();
             await once(events, 'published');
             const list = await redis.keys('*');
             assert.lengthOf(list, 1);
@@ -267,12 +265,10 @@ describe('queue-migration', function () {
 
         try {
             await run();
-            const amqp = new AMQPClient(sourceBrokerURL);
-            const conn = await amqp.connect();
-            const channel = await conn.channel();
-            const queue = await channel.queue('test-source');
+            const { queue, channel, conn } = await getFromBroker(sourceBrokerURL, 'test-source');
             await queue.publish('{"test": true}');
             await channel.close();
+            await conn.close();
             const [channelHost, id, data] = await once(events, 'published');
             const file = await readFile(`${filePath}/msg-${id}.txt`, { encoding: 'utf8' });
             assert.equal(file, '{"channel":1,"exchange":"","routingKey":"test-source","properties":{},"body":"{\\"test\\": true}"}');
@@ -283,7 +279,7 @@ describe('queue-migration', function () {
         await closeConnections();
     });
 
-    it('should successfully publish a 10MB message', async () => {
+    it('should successfully publish a 2MB message', async () => {
         const file = await read('../data/2mb-file.txt');
 
         const {run, events, closeConnections} = await load({
@@ -296,12 +292,10 @@ describe('queue-migration', function () {
 
         try {
             await run();
-            const amqp = new AMQPClient(sourceBrokerURL);
-            const conn = await amqp.connect();
-            const channel = await conn.channel();
-            const queue = await channel.queue('test-source');
+            const { queue, channel, conn } = await getFromBroker(sourceBrokerURL, 'test-source');
             await queue.publish(JSON.stringify(file));
             await channel.close();
+            await conn.close();
             const [channelHost, id, data] = await once(events, 'published');
             assert.ok(data.body.length > 2097152);
         } catch(err) {
@@ -310,4 +304,39 @@ describe('queue-migration', function () {
         }
         await closeConnections();
     });
+
+    it('should do a full e2e', async () => {
+        const {run, closeConnections} = await load({
+            AMQP_SOURCE_URL: sourceBrokerURL,
+            AMQP_SOURCE_QUEUE: 'test-source',
+            AMQP_DESTINATION_URL: destBrokerURL,
+            ENABLE_FILE_LOGGER: false,
+            RETRY_ON_FAIL: false
+        });
+
+        try {
+            await run();
+            const src = await getFromBroker(sourceBrokerURL, 'test-source');
+            await src.queue.publish('{"test": true}');
+            await src.channel.close();
+            await src.conn.close();
+
+            const dest = await getFromBroker(destBrokerURL, 'test-source');
+            const consumer = await dest.queue.subscribe({ noAck: false }, async (msg) => {
+                const body = msg.bodyToString();
+                assert.equal(body, '{"test": true}');
+                await msg.cancelConsumer();
+            });
+
+            await consumer.wait();
+            await dest.channel.close();
+            await dest.conn.close();
+
+        } catch(err) {
+            assert.ifError(err);
+            assert.fail('Should not throw');
+        }
+        await closeConnections();
+    });
+
 });

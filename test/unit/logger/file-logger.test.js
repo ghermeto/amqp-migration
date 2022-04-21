@@ -9,7 +9,7 @@ describe('redis-logger', () => {
        mock({ '/logs/events/msg-mock.txt': '{"test": true}' });
     });
     
-        after(() => {
+    after(() => {
         mock.restore();
     });
 
