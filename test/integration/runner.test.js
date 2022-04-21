@@ -200,7 +200,6 @@ describe('queue-migration', function () {
             AMQP_SOURCE_QUEUE: 'fail-queue',
             AMQP_DESTINATION_URL: destBrokerURL,
             ENABLE_FILE_LOGGER: false,
-            // AMQP_DESTINATION_QUEUE: null,
             RETRY_ON_FAIL: false
         });
 
