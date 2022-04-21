@@ -1,0 +1,26 @@
+{
+  "name": "queue-migration",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha 'test/**/*.test.js'"
+  },
+  "author": "gui.hermeto@gmail.com",
+  "license": "MIT",
+  "dependencies": {
+    "@cloudamqp/amqp-client": "^2.0.3",
+    "ioredis": "^5.0.4",
+    "nanoid": "^3.3.3",
+    "pino": "^7.10.0"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.1",
+    "@types/sinon": "^10.0.11",
+    "chai": "^4.3.6",
+    "mocha": "^9.2.2",
+    "mock-fs": "^5.1.2",
+    "sinon": "^13.0.2"
+  }
+}
