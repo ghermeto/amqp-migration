@@ -34,3 +34,58 @@ $ <environment vars> npm start
 | PRINT_RETURNED_BODY      |          | string   | Print the message body in the console. Default no. String 'yes' will enabled it.  |
 | LOG_LEVEL                |          | string   | Console log level. 'info', 'warn', 'error' levels available. Default 'info'  |
 
+### Tests setup
+
+#### Requirements
+
+- [Docker](https://docs.docker.com/get-docker/)
+- 
+
+#### Install the broker containers
+```shell
+$ docker pull rabbitmq:management
+$ docker run -d --hostname source-mq.localhost --name source-mq -p 5672:5672 -p 15672:15672 rabbitmq:management
+$ docker run -d --hostname dest-mq.localhost --name dest-mq -p 5673:5672 -p 15673:15672 rabbitmq:management
+```
+
+#### Install the Redis container
+```shell
+ $ docker pull redis
+ $ docker run --name redis-store -p 6379:6379 -d redis
+```
+
+#### Update `/etc/hosts`
+
+```
+127.0.0.1   source-mq.localhost
+127.0.0.1   dest-mq.localhost
+
+```
+
+#### Create the logs folder
+
+```shell
+$ mkdir /tmp/logs
+```
+
+### Configure the source broker
+
+On the broker source-mq.localhost (http://localhost:15672/) create:
+
+- exchanges: test-exchange, fail-exchange
+- queues: test-source, fail-queue
+- bind: test-exchange -> test-source
+ 
+### Configure the destination broker
+
+On the broker dest-mq.localhost (http://localhost:15673/) create:
+
+- exchanges: test-exchange, fail-exchange, no.queue
+- queues: queues: test-dest, test-source
+- bind: test-exchange -> test-source; test-exchange -> test-dest
+
+### Running tests
+
+```shell
+$ npm test
+```

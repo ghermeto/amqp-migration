@@ -3,6 +3,7 @@ import { AMQPClient } from '@cloudamqp/amqp-client';
 import pino from 'pino';
 import { nanoid } from 'nanoid'
 import {EventEmitter} from 'events';
+import assert from 'assert';
 
 // internal modules
 import FileLogger from './logger/file-logger.js';
@@ -22,6 +23,10 @@ const {
     PRINT_RETURNED_BODY = 'false',
     LOG_LEVEL = 'info'
 } = process.env;
+
+assert.ok(AMQP_SOURCE_URL, 'AMQP_SOURCE_URL is required');
+assert.ok(AMQP_SOURCE_QUEUE, 'AMQP_SOURCE_QUEUE is required');
+assert.ok(AMQP_DESTINATION_URL, 'AMQP_DESTINATION_URL is required');
 
 // loggers
 const logger = pino({ level: LOG_LEVEL });

@@ -5,7 +5,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "mocha 'test/**/*.test.js'"
+    "test": "mocha 'test/**/*.test.js' --exit",
+    "start": "node ./index.js"
   },
   "author": "gui.hermeto@gmail.com",
   "license": "MIT",
