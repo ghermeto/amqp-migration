@@ -1,7 +1,6 @@
 // external modules
 import { AMQPClient } from '@cloudamqp/amqp-client';
 import pino from 'pino';
-import { nanoid } from 'nanoid'
 import {EventEmitter} from 'events';
 import assert from 'assert';
 
@@ -155,7 +154,7 @@ export function startGracefulShutdown() {
  * @returns {string} message id or generated id
  */
 async function storeMessage(id, data) {
-    id = id ?? nanoid(10);
+    id = id ?? generateId();
 
     // tries to cache in redis if it is enabled
     try {
@@ -216,7 +215,7 @@ async function handleReturnedMessage(msg) {
     const data = formatMessage(msg);
 
     //format id
-    const id = msg.properties.messageId ?? nanoid(5); 
+    const id = msg.properties.messageId ?? generateId();
 
     // stores in file and/or redis
     await storeMessage(`returned-${id}`, data);
@@ -229,4 +228,12 @@ async function handleReturnedMessage(msg) {
         const {channel, exchange, routingKey, properties} = data;
         logger.warn({channel, exchange, routingKey, properties}, logMessage);
     }            
+}
+
+/**
+ * id from timestamp. since there is network involved collision is not possible
+ * @returns {string}
+ */
+function generateId() {
+    return String(Date.now())
 }

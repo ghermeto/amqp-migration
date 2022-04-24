@@ -13,7 +13,6 @@
   "dependencies": {
     "@cloudamqp/amqp-client": "^2.0.3",
     "ioredis": "^5.0.4",
-    "nanoid": "^3.3.3",
     "pino": "^7.10.0"
   },
   "devDependencies": {
