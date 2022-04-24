@@ -32,6 +32,7 @@ import { createSandbox } from 'sinon';
 import {once} from 'events';
 import Redis from 'ioredis';
 import { readFile } from 'fs/promises';
+import { setTimeout as timeout } from 'timers/promises';
 
 
 let envs = {};
@@ -71,6 +72,12 @@ async function getFromBroker(brokerUrl, queueName) {
     const channel = await conn.channel();
     const queue = await channel.queue(queueName);
     return { conn, channel, queue };
+}
+
+function* messageGenerator(numMessages = 1) {
+    for (let index = 0; index < numMessages; index++) {
+        yield `{"test": ${index}}`;
+    }
 }
 
 describe('queue-migration', function () {
@@ -338,4 +345,111 @@ describe('queue-migration', function () {
         await closeConnections();
     });
 
+    it('should do a full e2e with multiple messages', async () => {
+        const numMessages = 15;
+        const testMessages = messageGenerator(numMessages);
+
+        const {run, closeConnections} = await load({
+            AMQP_SOURCE_URL: sourceBrokerURL,
+            AMQP_SOURCE_QUEUE: 'test-source',
+            AMQP_DESTINATION_URL: destBrokerURL,
+            ENABLE_FILE_LOGGER: false,
+            RETRY_ON_FAIL: false
+        });
+
+        try {
+            const src = await getFromBroker(sourceBrokerURL, 'test-source');
+            let cache = [];
+            for await (let message of testMessages) {
+                cache.push(message);
+                await src.queue.publish(message);
+            }
+            await src.channel.close();
+            await src.conn.close();
+
+            // run the migration after the queue has messages
+            await run();
+
+            let acks = 0;
+            const dest = await getFromBroker(destBrokerURL, 'test-source');
+            const consumer = await dest.queue.subscribe({ noAck: false }, async (msg) => {
+                const body = msg.bodyToString();
+                // remove images in order
+                const expected = cache.shift();
+                assert.equal(expected, body);
+                await msg.ack();
+                acks++;
+                if (acks === numMessages) {
+                    await msg.cancelConsumer();
+                }
+            });
+
+            await consumer.wait();
+            await dest.channel.close();
+            await dest.conn.close();
+
+            // make sure they were all read
+            assert.equal(acks, numMessages);
+
+        } catch(err) {
+            assert.ifError(err);
+            assert.fail('Should not throw');
+        }
+        await closeConnections();
+    });
+
+    it('should do a full e2e with multiple delayed messages', async () => {
+        const numMessages = 5;
+        const testMessages = messageGenerator(numMessages);
+
+        const {run, closeConnections} = await load({
+            AMQP_SOURCE_URL: sourceBrokerURL,
+            AMQP_SOURCE_QUEUE: 'test-source',
+            AMQP_DESTINATION_URL: destBrokerURL,
+            ENABLE_FILE_LOGGER: false,
+            RETRY_ON_FAIL: false
+        });
+
+        try {
+            // run the migration first
+            await run();
+
+            const cache = [];
+            const src = await getFromBroker(sourceBrokerURL, 'test-source');
+            for await(let message of testMessages) {
+                // delay sending a message
+                cache.push(message);
+                await src.channel.basicPublish('', 'test-source', message, {});
+                await timeout(150);
+            }
+            await src.channel.close();
+            await src.conn.close();
+
+            let acks = 0;
+            const dest = await getFromBroker(destBrokerURL, 'test-source');
+            const consumer = await dest.queue.subscribe({ noAck: false }, async (msg) => {
+                const body = msg.bodyToString();
+                // remove images in order
+                const expected = cache.shift();
+                assert.equal(expected, body);
+                await msg.ack();
+                acks++;
+                if (acks === numMessages) {
+                    await msg.cancelConsumer();
+                }
+            });
+
+            await consumer.wait();
+            await dest.channel.close();
+            await dest.conn.close();
+
+            // make sure they were all read
+            assert.equal(acks, numMessages);
+
+        } catch(err) {
+            assert.ifError(err);
+            assert.fail('Should not throw');
+        }
+        await closeConnections();
+    });
 });

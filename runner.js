@@ -63,8 +63,10 @@ export async function run() {
 
         // connecting to destination
         const destConn = await amqpDestination.connect();
+        // setup a destination channel
+        let destChannel = await destConn.channel();
+        destChannel.onReturn = handleReturnedMessage;
         connMap.set('dest', destConn);
-
 
         // creating an exclusive consumer that requires acknowledge
         const consumer = await sourceQueue.subscribe({exclusive: true, noAck: false}, async (msg) => {
@@ -72,14 +74,11 @@ export async function run() {
             // format message
             const data = formatMessage(msg);
 
-            // stores in file, redis, etc
-            const id = await storeMessage(msg.properties.messageId, data);
-            logger.info('Received message ' + id);
-                
-            // setup a destination channel
-            const destChannel = await destConn.channel(data.channel);
-            destChannel.onReturn = handleReturnedMessage;
             try {
+                // stores in file, redis, etc
+                const id = await storeMessage(msg.properties.messageId, data);
+                logger.info('Received message ' + id);
+
                 //publishes to destination
                 await publishesMessage(destChannel, id, data);
 
@@ -94,8 +93,7 @@ export async function run() {
                 // do not print the body
                 const {channel, exchange, routingKey, properties} = data;
                 logger.error({channel, exchange, routingKey, properties}, errorMessage);
-            }
-            await destChannel.close();
+            } 
         });
 
     } catch(err) {
@@ -179,7 +177,7 @@ async function storeMessage(id, data) {
  */
 function formatMessage(msg) {
     return {
-        channel: msg.channel.id,
+        channel: msg.channel?.id,
         exchange: msg.exchange,
         routingKey: msg.routingKey,
         properties: msg.properties,
@@ -235,5 +233,5 @@ async function handleReturnedMessage(msg) {
  * @returns {string}
  */
 function generateId() {
-    return String(Date.now())
+    return String(Date.now());
 }
