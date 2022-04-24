@@ -15,13 +15,13 @@
  * $ docker pull redis
  * $ docker run --name redis-store -p 6379:6379 -d redis
  * 
- * on broker source-mq.localhost (http://localhost:15672/) create:
+ * The tests will automatically create on broker source-mq.localhost (http://localhost:15672/):
  * - exchanges: test-exchange, fail-exchange
  * - queues: test-source, fail-queue
  * - bind: test-exchange -> test-source
  * 
- * on broker dest-mq.localhost (http://localhost:15673/) create:
- * - exchanges: test-exchange, fail-exchange, no.queue
+ * The tests will automatically create on broker dest-mq.localhost (http://localhost:15673/):
+ * - exchanges: test-exchange, fail-exchange
  * - queues: test-dest, test-source
  * - bind: test-exchange -> test-source; test-exchange -> test-dest
  */
@@ -42,6 +42,66 @@ const sandbox = createSandbox();
 
 const sourceBrokerURL = 'amqp://source-mq.localhost:5672';
 const destBrokerURL = 'amqp://dest-mq.localhost:5673';
+
+/**
+ * initial queue, exchange and bindings setup
+ */
+async function prepareQueues() {
+    const source = new AMQPClient(sourceBrokerURL);
+    let sourceConn;
+    let sourceChannel;
+
+    try {
+        sourceConn = await source.connect();
+        sourceChannel = await sourceConn.channel();
+        await sourceChannel.queueUnbind('test-source', 'test-exchange', '');
+        await sourceChannel.queueDelete('test-source');
+        await sourceChannel.queueDelete('fail-queue');
+        await sourceChannel.exchangeDelete('test-exchange');
+        await sourceChannel.exchangeDelete('fail-exchange');
+
+        await sourceChannel.queueDeclare('test-source');
+        await sourceChannel.queueDeclare('fail-queue');
+        await sourceChannel.exchangeDeclare('test-exchange', 'direct');
+        await sourceChannel.exchangeDeclare('fail-exchange', 'direct');
+        await sourceChannel.queueBind('test-source', 'test-exchange', '');
+    } catch(e1) {
+        console.info(e1);
+        throw e1;
+    } finally {
+        if (sourceChannel && sourceChannel.close) sourceChannel.close();
+        if (sourceConn && sourceConn.close) sourceConn.close();
+    }
+
+    const dest = new AMQPClient(destBrokerURL);
+    let destConn;
+    let destChannel;
+
+    try {
+        destConn = await dest.connect();
+        destChannel = await destConn.channel();
+        await destChannel.queueUnbind('test-source', 'test-exchange', '');
+        await destChannel.queueUnbind('test-dest', 'test-exchange', '');
+        await destChannel.queueDelete('test-source');
+        await destChannel.queueDelete('test-dest');
+        await destChannel.exchangeDelete('test-exchange');
+        await destChannel.exchangeDelete('fail-exchange');
+
+        await destChannel.queueDeclare('test-source');
+        await destChannel.queueDeclare('test-dest');
+        await destChannel.exchangeDeclare('test-exchange', 'direct');
+        await destChannel.exchangeDeclare('fail-exchange', 'direct');
+        await destChannel.queueBind('test-source', 'test-exchange', '');
+        await destChannel.queueBind('test-dest', 'test-exchange', '');
+    } catch(e2) {
+        console.info(e2);
+        throw e2;
+    } finally {
+        if (destChannel && destChannel.close) destChannel.close();
+        if (destConn && destConn.close) destConn.close();
+    }
+
+}
 
 async function read(path) {
     const url = new URL(path, import.meta.url);
@@ -98,10 +158,7 @@ describe('queue-migration', function () {
 
     afterEach(async () => {
         sandbox.restore();
-        await purgeTestQueue(sourceBrokerURL, 'test-source');
-        await purgeTestQueue(sourceBrokerURL, 'fail-queue');
-        await purgeTestQueue(destBrokerURL, 'test-source');
-        await purgeTestQueue(destBrokerURL, 'test-dest');
+        await prepareQueues();
     });
 
 
@@ -419,8 +476,8 @@ describe('queue-migration', function () {
             for await(let message of testMessages) {
                 // delay sending a message
                 cache.push(message);
-                await src.channel.basicPublish('', 'test-source', message, {});
                 await timeout(150);
+                await src.channel.basicPublish('', 'test-source', message, {});
             }
             await src.channel.close();
             await src.conn.close();
